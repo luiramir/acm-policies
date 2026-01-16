@@ -1,0 +1,116 @@
+
+# -----------------------------
+# Si tu ManagedClusterSetBinding ya existe en open-cluster-management, puedes omitir el bloque “0) ManagedClusterSetBinding”.
+# 
+# Si prefieres que el Placement (y el Binding) vivan en otro namespace (por ejemplo uno “policies-prod”), entonces el ManagedClusterSetBinding debe estar en ese mismo namespace.
+# -----------------------------
+# -----------------------------
+# 0) ManagedClusterSetBinding
+#    (necesario para poder referenciar el ClusterSet desde este namespace)
+# -----------------------------
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: ManagedClusterSetBinding
+metadata:
+  name: <<clusterset-name>>              # suele ser el mismo nombre del clusterset
+  namespace: open-cluster-management
+spec:
+  clusterSet: <<clusterset-name>>        # ej: prod-clusterset
+
+---
+# -----------------------------
+# 1) POLICY: instala OpenShift GitOps Operator (OLM)
+# -----------------------------
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: install-openshift-gitops-operator
+  namespace: open-cluster-management
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: ns-openshift-gitops-operator
+        spec:
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: openshift-gitops-operator
+
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: og-openshift-gitops-operator
+        spec:
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1
+                kind: OperatorGroup
+                metadata:
+                  name: openshift-gitops-operator
+                  namespace: openshift-gitops-operator
+                spec:
+                  upgradeStrategy: Default
+
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: sub-openshift-gitops-operator
+        spec:
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1alpha1
+                kind: Subscription
+                metadata:
+                  name: openshift-gitops-operator
+                  namespace: openshift-gitops-operator
+                spec:
+                  channel: latest
+                  installPlanApproval: Automatic
+                  name: openshift-gitops-operator
+                  source: redhat-operators
+                  sourceNamespace: openshift-marketplace
+
+---
+# -----------------------------
+# 2) PLACEMENT: selecciona clusters por ClusterSet
+# -----------------------------
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: install-openshift-gitops-operator-placement
+  namespace: open-cluster-management
+spec:
+  clusterSets:
+    - <<clusterset-name>>    # ej: prod-clusterset
+
+---
+# -----------------------------
+# 3) PLACEMENTBINDING: une Policy + Placement
+# -----------------------------
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: install-openshift-gitops-operator-binding
+  namespace: open-cluster-management
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: install-openshift-gitops-operator-placement
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: install-openshift-gitops-operator

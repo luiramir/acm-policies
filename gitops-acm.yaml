@@ -1,0 +1,127 @@
+# -----------------------------
+# <<operator-name>>: nombre “corto” para tus recursos (ej: local-storage).
+# 
+# <<target-namespace>>: openshift-operators o uno dedicado (ej: openshift-local-storage).
+# 
+# <<channel>>: el canal del operador (ej: stable).
+# 
+# <<package-name>>: el “package” de OLM (nombre del operador en el catálogo).
+# 
+# <<catalog-source>> / <<catalog-namespace>>: normalmente redhat-operators en openshift-marketplace.
+# 
+# <<label-key>> / <<label-value>>: etiqueta que identifique los clusters destino.
+# -----------------------------
+# -----------------------------
+# 1) POLICY: instala OpenShift GitOps Operator (OLM)
+# -----------------------------
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: install-openshift-gitops-operator
+  namespace: open-cluster-management
+  annotations:
+    policy.open-cluster-management.io/standards: OLM
+    policy.open-cluster-management.io/categories: Operators
+    policy.open-cluster-management.io/controls: OperatorInstallation
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    # Namespace donde se instala el operador (default actual)
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: ns-openshift-gitops-operator
+        spec:
+          remediationAction: enforce
+          severity: low
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: openshift-gitops-operator
+
+    # OperatorGroup (necesario para namespaces dedicados)
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: og-openshift-gitops-operator
+        spec:
+          remediationAction: enforce
+          severity: low
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1
+                kind: OperatorGroup
+                metadata:
+                  name: openshift-gitops-operator
+                  namespace: openshift-gitops-operator
+                spec:
+                  upgradeStrategy: Default
+
+    # Subscription (instala el operador)
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: sub-openshift-gitops-operator
+        spec:
+          remediationAction: enforce
+          severity: high
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1alpha1
+                kind: Subscription
+                metadata:
+                  name: openshift-gitops-operator
+                  namespace: openshift-gitops-operator
+                spec:
+                  channel: latest
+                  installPlanApproval: Automatic
+                  name: openshift-gitops-operator
+                  source: redhat-operators
+                  sourceNamespace: openshift-marketplace
+
+---
+# -----------------------------
+# 2) PLACEMENT: selecciona clusters destino (por label)
+#    Ajusta matchExpressions a tu criterio
+# -----------------------------
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: install-openshift-gitops-operator-placement
+  namespace: open-cluster-management
+spec:
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: env
+              operator: In
+              values:
+                - prod
+
+---
+# -----------------------------
+# 3) PLACEMENTBINDING: une Policy + Placement
+# -----------------------------
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: install-openshift-gitops-operator-binding
+  namespace: open-cluster-management
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: install-openshift-gitops-operator-placement
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: install-openshift-gitops-operator

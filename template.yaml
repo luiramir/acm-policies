@@ -1,0 +1,132 @@
+# -----------------------------
+# <<operator-name>>: nombre “corto” para tus recursos (ej: local-storage).
+# 
+# <<target-namespace>>: openshift-operators o uno dedicado (ej: openshift-local-storage).
+# 
+# <<channel>>: el canal del operador (ej: stable).
+# 
+# <<package-name>>: el “package” de OLM (nombre del operador en el catálogo).
+# 
+# <<catalog-source>> / <<catalog-namespace>>: normalmente redhat-operators en openshift-marketplace.
+# 
+# <<label-key>> / <<label-value>>: etiqueta que identifique los clusters destino.
+# -----------------------------
+# -----------------------------
+# 1) POLICY (aplica Namespace/OperatorGroup/Subscription)
+# -----------------------------
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: install-operator-<<operator-name>>
+  namespace: open-cluster-management
+  annotations:
+    policy.open-cluster-management.io/standards: OLM
+    policy.open-cluster-management.io/categories: Operators
+    policy.open-cluster-management.io/controls: OperatorInstallation
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    # (Opcional) Namespace destino (si no existe)
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: ns-<<target-namespace>>
+        spec:
+          remediationAction: enforce
+          severity: low
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: <<target-namespace>>   # ej: openshift-operators
+
+    # OperatorGroup (requerido si usas un namespace dedicado; en openshift-operators por defecto)
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: operatorgroup-<<operator-name>>
+        spec:
+          remediationAction: enforce
+          severity: low
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1
+                kind: OperatorGroup
+                metadata:
+                  name: <<operator-name>>-og
+                  namespace: <<target-namespace>>
+                spec:
+                  # Para instalación "global" usa un OperatorGroup sin targetNamespaces (o targetNamespaces vacío),
+                  # para namespace dedicado, ponlo aquí:
+                  targetNamespaces:
+                    - <<target-namespace>>
+
+    # Subscription (instala el operador)
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: subscription-<<operator-name>>
+        spec:
+          remediationAction: enforce
+          severity: high
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1alpha1
+                kind: Subscription
+                metadata:
+                  name: <<operator-name>>
+                  namespace: <<target-namespace>>
+                spec:
+                  channel: "<<channel>>"                 # ej: stable / fast
+                  name: "<<package-name>>"               # ej: local-storage-operator
+                  source: "<<catalog-source>>"           # ej: redhat-operators
+                  sourceNamespace: "<<catalog-namespace>>" # ej: openshift-marketplace
+                  installPlanApproval: Automatic
+                  # Opcional: fija una versión/CSV concreta
+                  # startingCSV: "<<startingCSV>>"
+
+---
+# -----------------------------
+# 2) PLACEMENT (elige clusters destino)
+#    Opción A: por label (recomendado)
+# -----------------------------
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: install-operator-<<operator-name>>-placement
+  namespace: open-cluster-management
+spec:
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: <<label-key>>      # ej: env
+              operator: In
+              values:
+                - <<label-value>>     # ej: prod
+
+---
+# -----------------------------
+# 3) PLACEMENTBINDING (une Policy + Placement)
+# -----------------------------
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: install-operator-<<operator-name>>-binding
+  namespace: open-cluster-management
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: install-operator-<<operator-name>>-placement
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: install-operator-<<operator-name>>
